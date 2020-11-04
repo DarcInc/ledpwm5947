@@ -17,10 +17,8 @@
 
 use embedded_hal::digital::v2::OutputPin;
 
-/// The PWM_MASK allows us to "mask" the extra bits in a 16 bit integer, which
-/// is what we're using to store the PWM state.  Since this is used internally,
-/// to clamp values to a valid 12-bit number, we don't need to export it.
-const PWM_MASK: u16 = 0x0fff;
+pub mod pwm;
+
 
 /// This is the set of masks we'll use to check if the bit on a 12-bit number is
 /// 1 or 0.  Since this is internal to our implementation, we don't need to export
@@ -94,6 +92,7 @@ where
     }
 }
 
+
 /// This represents an individual device.  It has four pins that are used, the
 /// L or Latch pin, the D or Data pin, the O or OE pin, and the C or Clock pin.
 /// The reason these are generic parameters is that each pin is it's own data
@@ -160,7 +159,7 @@ where
     /// range of 24, but silently.
     pub fn write_pwm(&mut self, channel: &usize, pwm_value: &u16) {
         if *channel < 24 {
-            self.buffer[*channel] = *pwm_value & PWM_MASK;
+            self.buffer[*channel] = *pwm_value & pwm::PWM_MASK;
         }
     }
 
@@ -327,4 +326,5 @@ mod tests {
             assert!(false);
         }
     }
+
 }
