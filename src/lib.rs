@@ -83,6 +83,8 @@ where
     }
 }
 
+/// Channel identifies a legal channel on the board.  There are only 24
+/// legal values for channel.  These constants represent the 24 channels.
 pub struct Channel(usize);
 pub const C1: Channel = Channel(0);
 pub const C2: Channel = Channel(1);
@@ -109,6 +111,8 @@ pub const C22: Channel = Channel(21);
 pub const C23: Channel = Channel(22);
 pub const C24: Channel = Channel(23);
 
+/// A slice of all channels to facilitate logic that iterates over the list of
+/// available channels.
 pub const ALL_CHANNELS: &[Channel] = &[
     C1, C2, C3, C4, C5, C6, C7, C8, C9, C10, C11, C12, C13, C14, C15, C16, C17, C18, C19, C20, C21,
     C22, C23, C24,
@@ -159,8 +163,8 @@ where
     }
 
     /// During debugging I wanted some way to make sure the device was initialized
-    /// to known, good values.  This sets all the pins to "low" and clears the
-    /// buffer holding the PWM values to zero.
+    /// to known, good values.  It clears the data in the buffer and sets it to the
+    /// PWM's `min` value.
     pub fn begin(&mut self) -> Result<(), PinError> {
         self.oe.set_low()?;
         self.latch.set_low()?;
@@ -174,10 +178,8 @@ where
         Ok(())
     }
 
-    /// Writes a value into the given channel.  It basically updates the buffer
-    /// of values, making sure the passed in value a 12-bit integer by making it
-    /// with the PWM_MASK, above.  We also don't worry about values outsie the
-    /// range of 24, but silently.
+    /// Writes a value into the given channel.  It saves the PWM value into the 
+    /// buffer for the given channel.
     pub fn write_pwm(&mut self, channel: &Channel, pwm_value: &pwm::PWMValue) {
         self.buffer[channel.0] = *pwm_value;
     }
