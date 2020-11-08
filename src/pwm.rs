@@ -1,16 +1,25 @@
-//! The PWM module encapsulates the PWM values passed to the 5947.  This shouldn't 
+//! The PWM module encapsulates the PWM values passed to the 5947.  This shouldn't
 //! be confused with the PWM from the hardware hal or processor specific hal.
-//! 
-
+//!
+//! PWM values are opaque types that represent a duty cycle for a driven PWM.
+//! The are changed by stepping them up and down, using a Step.  it is possible
+//! that the stepped value exceeds the PWM limits (usually 0 and some 8, 10,
+//! or 12 bit value).  In this case an `Overflow` or `Underflow` error is
+//! returned.
+//!
+//! New PWM values are clamped between min and max.  Step values are clamped
+//! between -min and max.  Creating a new PWM value does not cause an error,
+//! but operations are intended to highlight code issues that might indifinitely
+//! loop on stepping up or down a PWM, thinking the limit has not been reached.
 
 /// The PWM_MASK allows us to "mask" the extra bits in a 16 bit integer, which
 /// is what we're using to store the PWM state.  Since this is used internally,
 /// to clamp values to a valid 12-bit number, we don't need to export it.
 pub const PWM_MASK: u16 = 0x0fff;
 
-/// The PWM value is a number between 0 and the maximum 12-bit value.  As an 
+/// The PWM value is a number between 0 and the maximum 12-bit value.  As an
 /// invariant, the PWM value can never be below 0 or above 4095.
-#[derive(Copy, Clone, PartialOrd, PartialEq)]
+#[derive(Copy, Clone, PartialOrd, PartialEq, Debug)]
 pub struct PWMValue {
     raw: i16,
 }
@@ -32,28 +41,36 @@ pub struct Step {
     amount: i16,
 }
 
+/// This is the set of masks we'll use to check if the bit on a 12-bit number is
+/// 1 or 0.  Since this is internal to our implementation, we don't need to export
+/// it.  Preferred to have the masks in an array for easier iteration.
+const PWM_BIT_MASKS: [u16; 12] = [
+    0x0800_u16, 0x0400_u16, 0x0200_u16, 0x0100_u16, 0x0080_u16, 0x0040_u16, 0x0020_u16, 0x0010_u16,
+    0x0008_u16, 0x0004_u16, 0x0002_u16, 0x0001_u16,
+];
+
 impl Step {
-    /// Create a new Step from a raw numeric value.  The step will be clamped to 
+    /// Create a new Step from a raw numeric value.  The step will be clamped to
     /// the range `-PWM_MASK` .. `PWM_MASK`.  There are no preconditions, but the
     /// post-condition to creating the step is it falls in the valid range.
-    /// 
+    ///
     /// ```
     /// use ledpwm5947::pwm::Step;
-    /// 
+    ///
     /// let too_large_step = Step::new(5000);
     /// let max_step = Step::new(4095);
-    /// 
+    ///
     /// assert_eq!(too_large_step, max_step);
-    /// 
+    ///
     /// let too_large_step = Step::new(-5000);
     /// let max_step = Step::new(-4095);
-    /// 
+    ///
     /// assert_eq!(too_large_step, max_step);
-    /// ``` 
+    /// ```
     pub fn new(amount: i32) -> Self {
         if amount > PWM_MASK as i32 {
             Step {
-                amount: PWM_MASK as i16
+                amount: PWM_MASK as i16,
             }
         } else if amount < -(PWM_MASK as i32) {
             Step {
@@ -68,13 +85,13 @@ impl Step {
 
     /// Reverse the direction of a step.  There are no preconditions and the
     /// post-condition is that the step is the same magnitude but opposite sign.
-    /// 
+    ///
     /// ```
     /// use ledpwm5947::pwm::Step;
-    /// 
+    ///
     /// let forward_step = Step::new(10);
     /// let reversed = forward_step.reverse();
-    /// 
+    ///
     /// assert_eq!(Step::new(-10), reversed);
     /// ```
     pub fn reverse(&self) -> Self {
@@ -84,23 +101,23 @@ impl Step {
     }
 
     /// The checked_new function returns a range error if the new Step value is
-    /// out of range.  This is useful where an error is desirable if the logic 
+    /// out of range.  This is useful where an error is desirable if the logic
     /// can produce and invalid step.  There are no preconditions.  The post-
-    /// conditions are that the returned step falls in the range or an error 
+    /// conditions are that the returned step falls in the range or an error
     /// is returned indicating `underflow` if the value is less than -4095 or
     /// `overflow` if the value is above 4095.
-    /// 
+    ///
     /// ```
     /// use ledpwm5947::pwm::Step;
     /// use ledpwm5947::pwm::RangeError;
-    /// 
+    ///
     /// let normal_step = Step::checked_new(100).expect("The value indicates a valid step");
     /// if let Err(v) = Step::checked_new(5000) {
     ///     assert_eq!(v, RangeError::Overflow);
     /// } else {
     ///     assert!(false, "Should have returned an error");
     /// }
-    /// 
+    ///
     /// if let Err(v) = Step::checked_new(-5000) {
     ///     assert_eq!(v, RangeError::Underflow)
     /// } else {
@@ -113,20 +130,18 @@ impl Step {
         } else if amount > 4095 as i16 {
             Err(RangeError::Overflow)
         } else {
-            Ok(Step {
-                amount
-            })
+            Ok(Step { amount })
         }
     }
 
     /// Doubles the step magnitude.  Returns a range error if it overflows.
-    /// 
+    ///
     /// ```
     /// use ledpwm5947::pwm::{Step, RangeError};
-    /// 
+    ///
     /// let small_step = Step::new(10);
     /// let doubled = small_step.double().expect("It should double");
-    /// 
+    ///
     /// let big_step = Step::new(3000);
     /// if let Err(v) = big_step.double() {
     ///     assert_eq!(RangeError::Overflow, v);
@@ -135,36 +150,36 @@ impl Step {
     /// }
     /// ```
     pub fn double(&self) -> Result<Self, RangeError> {
-        let temp = self.amount << 1;
-        Self::checked_new(temp)
+        let doubled_value = self.amount << 1;
+        Self::checked_new(doubled_value)
     }
 
     /// Cuts the size of the step in half.  It is not expected to overflow
     /// or underflow.
-    /// 
+    ///
     /// ```
     /// use ledpwm5947::pwm::Step;
-    /// 
+    ///
     /// let step = Step::new(20);
     /// let half_step = Step::new(10);
-    /// 
+    ///
     /// assert_eq!(half_step, step.half_step())
     /// ```
     pub fn half_step(&self) -> Self {
         Step {
             amount: self.amount / 2,
-        }       
+        }
     }
 
     /// Cuts the size of a step to one-forth its size.  It uses integer arithmetic
-    /// and so remainders are truncated. 
-    /// 
+    /// and so remainders are truncated.
+    ///
     /// ```
     /// use ledpwm5947::pwm::Step;
     /// let step = Step::new(20);
-    /// 
+    ///
     /// assert_eq!(Step::new(5), step.quarter_step());
-    /// 
+    ///
     /// let step = Step::new(22);
     /// assert_eq!(Step::new(5), step.quarter_step());
     /// ```
@@ -176,13 +191,13 @@ impl Step {
 
     /// Cuts the size of a step into one-eighth its size.  It uses integer
     /// arithmetic, so the remainders are truncated.
-    /// 
+    ///
     /// ```
     /// use ledpwm5947::pwm::Step;
-    /// 
+    ///
     /// let step = Step::new(32);
     /// assert_eq!(Step::new(4), step.eighth_step());
-    /// 
+    ///
     /// let step = Step::new(255);
     /// assert_eq!(Step::new(31), step.eighth_step());
     /// ```
@@ -194,13 +209,13 @@ impl Step {
 
     /// Cuts the size of a step into one-sixteenth its size.  It uses integer
     /// arithmetic, so the remainders are truncated.
-    /// 
+    ///
     /// ```
     /// use ledpwm5947::pwm::Step;
-    /// 
+    ///
     /// let step = Step::new(32);
     /// assert_eq!(Step::new(2), step.sixteenth_step());
-    /// 
+    ///
     /// let step = Step::new(255);
     /// assert_eq!(Step::new(15), step.sixteenth_step());
     /// ```
@@ -214,22 +229,43 @@ impl Step {
 impl core::ops::Add for Step {
     type Output = Result<Self, RangeError>;
 
+    /// Add two steps together.  The sum can overflow or underflow if the total
+    /// step size exceeds the PWM maximum value.
+    ///
+    /// ```
+    /// use ledpwm5947::pwm::{Step, RangeError};
+    ///
+    /// let step1 = Step::new(15);
+    /// let step2 = Step::new(14);
+    ///
+    /// let result = (step1 + step2).expect("It should add the two values");
+    /// assert_eq!(Step::new(29), result);
+    ///
+    /// let step1 = Step::new(4000);
+    /// let step2 = Step::new(2000);
+    ///
+    /// if let Err(v) = step1 + step2 {
+    ///     assert_eq!(RangeError::Overflow, v);
+    /// } else {
+    ///     assert!(false, "Should have returned an error");
+    /// }
+    /// ```
     fn add(self, rhs: Step) -> Self::Output {
-        let temp = self.amount + rhs.amount;
-        if temp < 0 {
-            if -temp > PWM_MASK as i16 {
+        let computed_value = self.amount + rhs.amount;
+        if computed_value < 0 {
+            if -computed_value > PWM_MASK as i16 {
                 Err(RangeError::Underflow)
             } else {
                 Ok(Step {
-                    amount: temp,
+                    amount: computed_value,
                 })
             }
         } else {
-            if temp > PWM_MASK as i16 {
+            if computed_value > PWM_MASK as i16 {
                 Err(RangeError::Overflow)
             } else {
                 Ok(Step {
-                    amount: temp,
+                    amount: computed_value,
                 })
             }
         }
@@ -239,78 +275,196 @@ impl core::ops::Add for Step {
 impl core::ops::Sub for Step {
     type Output = Result<Self, RangeError>;
 
+    /// Implements subtraction for a step
+    ///
+    /// ```
+    /// use ledpwm5947::pwm::{Step, RangeError};
+    ///
+    /// let step1 = Step::new(50);
+    /// let step2 = Step::new(25);
+    ///
+    /// assert_eq!(Step::new(-25), (step2 - step1).expect("It should subtract two steps"));
+    ///
+    /// let step1 = Step::new(-2500);
+    /// let step2 = Step::new(2500);
+    ///
+    /// let step3 = step1 - step2;
+    ///
+    /// if let Err(v) = step1 - step2 {
+    ///     assert_eq!(v, RangeError::Underflow);
+    /// } else {
+    ///     assert!(false, "It should have raised an error");
+    /// }
+    /// ```
     fn sub(self, rhs: Step) -> Self::Output {
-        let temp = self.amount - rhs.amount;
-        if temp < -4095 {
+        let computed_value = self.amount - rhs.amount;
+        if computed_value < -4095 {
             Err(RangeError::Underflow)
-        } else if temp > 4095 {
+        } else if computed_value > 4095 {
             Err(RangeError::Overflow)
         } else {
             Ok(Step {
-                amount: temp,
+                amount: computed_value,
             })
         }
     }
 }
 
 impl PWMValue {
+    /// Returns a new PWM value given a number.  If the value is greater than
+    /// PWM max, it is set to max, if it is less than min, it is set to min.
+    ///
+    /// ```
+    /// use ledpwm5947::pwm::PWMValue;
+    ///
+    /// let p1 = PWMValue::new(27);
+    /// assert_eq!(PWMValue::new(27), p1);
+    ///
+    /// let p1 = PWMValue::new(5000);
+    /// assert_eq!(PWMValue::max(), p1);
+    ///
+    /// let p1 = PWMValue::new(-5000);
+    /// assert_eq!(PWMValue::min(), p1);
+    /// ```
     pub fn new(v: i32) -> Self {
         if v > PWM_MASK as i32 {
             PWMValue::max()
         } else if v < 0 {
             PWMValue::min()
         } else {
-            PWMValue {
-                raw: v as i16,
-            }
+            PWMValue { raw: v as i16 }
         }
     }
 
+    /// Returns the minimum PWM setting, in this case it's zero.
+    ///
+    /// ```
+    /// use ledpwm5947::pwm::PWMValue;
+    ///
+    /// let min = PWMValue::min();
+    /// let p1 = PWMValue::new(1);
+    /// let p2 = PWMValue::new(0);
+    /// let p3 = PWMValue::new(-1);
+    ///
+    /// assert!(p1 != min, "1 should not be min");
+    /// assert!(p2 == min, "Zero should be also min");
+    /// assert!(p3 == min, "-1 should also clamp to min");
+    /// ```
     pub fn min() -> Self {
-        PWMValue {
-            raw: 0,
-        }
+        PWMValue { raw: 0 }
     }
 
+    /// Returns the maximum PWM setting, in this case it's 4095.
+    ///
+    /// ```
+    /// use ledpwm5947::pwm::PWMValue;
+    ///
+    /// let max = PWMValue::max();
+    /// let p1 = PWMValue::new(4094);
+    /// let p2 = PWMValue::new(4095);
+    /// let p3 = PWMValue::new(4096);
+    ///
+    /// assert!(p1 != max, "4094 should be less than max");
+    /// assert!(p2 == max, "4095 should be the max for 12 bit");
+    /// assert!(p3 == max, "4096 should clamp to max");
+    /// ```
     pub fn max() -> Self {
-        PWMValue {
-            raw: 0x0FFF,
+        PWMValue { raw: 0x0FFF }
+    }
+
+    pub(crate) fn bits(&self) -> [bool; 12] {
+        let mut result: [bool; 12] = [false; 12];
+
+        for i in 0..12 {
+            result[i] = PWM_BIT_MASKS[i] & (self.raw as u16) > 0;
         }
+
+        result
     }
 }
 
 impl core::default::Default for PWMValue {
+    /// Default PWM value should be off, or zero.
+    ///
+    /// ```
+    /// use ledpwm5947::pwm::PWMValue;
+    ///
+    /// let v = PWMValue::default();
+    ///
+    /// assert_eq!(PWMValue::new(0), v);
+    /// ```
     fn default() -> Self {
         PWMValue::min()
     }
 }
 
 impl core::default::Default for Step {
+    /// The default value for a step should be 1.
+    ///
+    /// ```
+    /// use ledpwm5947::pwm::Step;
+    ///
+    /// let s = Step::default();
+    /// assert_eq!(Step::new(1), s);
+    /// ```
     fn default() -> Self {
-        Step {
-            amount: 1,
-        }
+        Step { amount: 1 }
     }
 }
 
 impl core::ops::Add<Step> for PWMValue {
     type Output = Result<Self, RangeError>;
 
+    /// PWM values are altered by stepping them up or down.  The current value
+    /// is stepped up or down by a  positive or negative step.  The resulting
+    /// value can underflow or overflow.
+    ///
+    /// ```
+    /// use ledpwm5947::pwm::{PWMValue, Step, RangeError};
+    ///
+    /// let p1 = PWMValue::new(100);
+    /// let s1 = Step::new(10);
+    ///
+    /// let p2 = p1 + s1;
+    /// assert_eq!(PWMValue::new(110), p2.expect("It should equal 110"));
+    ///
+    /// let p1 = PWMValue::new(100);
+    /// let s1 = Step::new(-10);
+    ///
+    /// let p2 = p1 + s1;
+    /// assert_eq!(PWMValue::new(90), p2.expect("It should equal 90"));
+    ///
+    /// let p1 = PWMValue::new(4500);
+    /// let s1 = Step::new(500);
+    ///
+    /// if let Err(v) = p1 + s1 {
+    ///     assert_eq!(RangeError::Overflow, v);
+    /// } else {
+    ///     assert!(false, "It should have raised an error");
+    /// }
+    ///
+    /// let p1 = PWMValue::new(-2500);
+    /// let s1 = Step::new(-2500);
+    ///
+    /// if let Err(v) = p1 + s1 {
+    ///     assert_eq!(RangeError::Underflow, v);
+    /// } else {
+    ///     assert!(false, "It should have raised an error");
+    /// }
+    /// ```
     fn add(self, rhs: Step) -> Self::Output {
-        let temp = self.raw + rhs.amount;
-        if temp < 0 {
+        let computed_value = self.raw + rhs.amount;
+        if computed_value < 0 {
             Err(RangeError::Underflow)
-        } else if temp > PWM_MASK as i16  {
+        } else if computed_value > PWM_MASK as i16 {
             Err(RangeError::Overflow)
         } else {
             Ok(PWMValue {
-                raw: temp,
+                raw: computed_value,
             })
         }
     }
 }
-
-
 
 #[cfg(test)]
 mod tests {
@@ -320,7 +474,7 @@ mod tests {
     fn test_make_pwm() {
         let v1 = PWMValue::new(30);
         assert_eq!(30, v1.raw);
-        
+
         let v2 = PWMValue::new(-1);
         assert_eq!(0, v2.raw);
 
@@ -360,8 +514,20 @@ mod tests {
         let positiive_step = Step::new(10);
         let reversed = positiive_step.reverse();
         assert_eq!(-10, reversed.amount);
-        
+
         let reversed = reversed.reverse();
         assert_eq!(10, reversed.amount);
+    }
+
+    #[test]
+    fn test_step_subtraction() {
+        let step1 = Step::new(-2500);
+        let step2 = Step::new(2500);
+
+        let step3 = step1 - step2;
+        match step3 {
+            Err(v) => assert_eq!(RangeError::Underflow, v),
+            Ok(_) => assert!(false, "should have returned an error"),
+        }
     }
 }
