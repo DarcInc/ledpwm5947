@@ -85,6 +85,9 @@ where
 
 /// Channel identifies a legal channel on the board.  There are only 24
 /// legal values for channel.  These constants represent the 24 channels.
+/// It may be necessary to switch to a non-public channel constructor so
+/// only these 24 channels can be instantiated, and the channel number is
+/// opaque.
 pub struct Channel(usize);
 pub const C1: Channel = Channel(0);
 pub const C2: Channel = Channel(1);
@@ -230,7 +233,7 @@ mod tests {
     use core::convert::Infallible;
     use embedded_hal::digital::v2::OutputPin;
 
-    /// Fake pin for testing purposes.
+    // Fake pin for testing purposes.
     struct FakePin {
         value: bool,
     }

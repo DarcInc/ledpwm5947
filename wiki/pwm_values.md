@@ -122,3 +122,28 @@ impl PWMValue {
 
 ### Implementing Min and Max and Default
 implementing the concepts 
+
+## Doc Tests vs Mod Test
+One interesting note is that I find doc tests just as effective in the initial development.
+It both documents the intent of the function and verifies its compliance with that intent.
+Going forward, I think I will prefer doc tests over module tests.
+Module tests may be reserved more for validating bug fixes and making sure there are no regressions in the future.
+
+During the initial development I'm interested in basic cases.
+Happy path - does the API do what it's supposed to when all the inputs are reasonable?
+Simple bad path - given expected "bad" inputs, does it raise the expected errors?
+As I started documenting the code I quickly realized my doc tests would duplicate the tests in the test module.
+This crates two distinct things to maintain, but offer no new capability.
+
+In general, happy path and expected bad path are not enough.
+I'm limited in both imagination and time when creating the initial implementation.
+There may be edge cases or situations I have not considered.
+Have I covered every case in which an expected invariant may be violated?
+What if someone misuses some API in a novel way?
+The type system attempts to prevent misuse, but only if I design the types correctly.
+
+In theory, unforseen edge cases and misuse of the API will result in a bug.
+That bug, when resolved, should become a module test.
+Fuzzing the input attempts to drive out these edge cases when those cases are not obvious.
+However, these edge cases are bugs and don't fit into documentation comments.
+Therefor they should go into module comments.
