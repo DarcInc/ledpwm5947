@@ -68,17 +68,23 @@ where
 {
     type Error = PinError;
 
-    fn set_high(&mut self) -> Result<(), Self::Error> {
-        match self.raw_pin.set_high() {
-            Ok(_) => Ok(()),
-            Err(_) => Err(PinError::new(&self.which_pin, "Failed to set high")),
-        }
-    }
-
+    /// Set the pin to low value.  The actual hardware pin should never return
+    /// an error, but I chose to return a `PinError` so the
+    /// error handling can be similar to functions that may return an error.
     fn set_low(&mut self) -> Result<(), Self::Error> {
         match self.raw_pin.set_low() {
             Ok(_) => Ok(()),
             Err(_) => Err(PinError::new(&self.which_pin, "Failed to set low")),
+        }
+    }
+
+    /// Set the pin to a high value.  The actual hardware pin should never
+    /// return an error, but I chose to return a `PinError` so the error
+    /// handling code can be similar to functions tha may return an error.
+    fn set_high(&mut self) -> Result<(), Self::Error> {
+        match self.raw_pin.set_high() {
+            Ok(_) => Ok(()),
+            Err(_) => Err(PinError::new(&self.which_pin, "Failed to set high")),
         }
     }
 }
@@ -241,13 +247,13 @@ mod tests {
     impl OutputPin for FakePin {
         type Error = Infallible;
 
-        fn set_high(&mut self) -> Result<(), Self::Error> {
-            self.value = true;
+        fn set_low(&mut self) -> Result<(), Self::Error> {
+            self.value = false;
             Ok(())
         }
 
-        fn set_low(&mut self) -> Result<(), Self::Error> {
-            self.value = false;
+        fn set_high(&mut self) -> Result<(), Self::Error> {
+            self.value = true;
             Ok(())
         }
     }
@@ -314,23 +320,26 @@ mod tests {
         }
     }
 
+    // This impl allows me to simulate pin failures.  This allows me to unit
+    // test the error handling without triggering some kind of failure on
+    // physical hardware.
     impl OutputPin for FailingPin {
         type Error = &'static str;
-
-        fn set_high(&mut self) -> Result<(), Self::Error> {
-            if self.will_fail {
-                Err("Failed")
-            } else {
-                self.value = true;
-                Ok(())
-            }
-        }
 
         fn set_low(&mut self) -> Result<(), Self::Error> {
             if self.will_fail {
                 Err("Failed")
             } else {
                 self.value = false;
+                Ok(())
+            }
+        }
+
+        fn set_high(&mut self) -> Result<(), Self::Error> {
+            if self.will_fail {
+                Err("Failed")
+            } else {
+                self.value = true;
                 Ok(())
             }
         }
