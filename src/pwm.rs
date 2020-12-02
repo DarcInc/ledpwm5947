@@ -466,6 +466,73 @@ impl core::ops::Add<Step> for PWMValue {
     }
 }
 
+impl Iterator for PWMValue {
+    type Item = PWMValue;
+
+    fn next(&mut self) -> Option<PWMValue> {
+        if self.raw < 4095_i16 {
+            self.raw += 1;
+            Some(PWMValue { raw: self.raw })
+        } else {
+            None
+        }
+    }
+}
+
+impl From<u8> for PWMValue {
+    fn from(val: u8) -> Self {
+        let shifted = (val as i16) << 4;
+        match val {
+            0 => PWMValue { raw: shifted },
+            1..=15 => PWMValue {
+                raw: shifted | 0x0001,
+            },
+            16..=31 => PWMValue {
+                raw: shifted | 0x0002,
+            },
+            32..=47 => PWMValue {
+                raw: shifted | 0x0003,
+            },
+            48..=63 => PWMValue {
+                raw: shifted | 0x0004,
+            },
+            64..=79 => PWMValue {
+                raw: shifted | 0x0005,
+            },
+            80..=95 => PWMValue {
+                raw: shifted | 0x0006,
+            },
+            96..=111 => PWMValue {
+                raw: shifted | 0x0007,
+            },
+            112..=127 => PWMValue {
+                raw: shifted | 0x0008,
+            },
+            128..=143 => PWMValue {
+                raw: shifted | 0x0009,
+            },
+            144..=159 => PWMValue {
+                raw: shifted | 0x000A,
+            },
+            160..=175 => PWMValue {
+                raw: shifted | 0x000B,
+            },
+            176..=191 => PWMValue {
+                raw: shifted | 0x000C,
+            },
+            192..=207 => PWMValue {
+                raw: shifted | 0x000D,
+            },
+            208..=223 => PWMValue {
+                raw: shifted | 0x000E,
+            },
+            _ => PWMValue {
+                raw: shifted | 0x000F,
+            },
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -528,6 +595,59 @@ mod tests {
         match step3 {
             Err(v) => assert_eq!(RangeError::Underflow, v),
             Ok(_) => assert!(false, "should have returned an error"),
+        }
+    }
+
+    #[test]
+    fn test_simple_iteration() {
+        let mut last_value = PWMValue::default();
+        let mut counter = 0;
+
+        for i in PWMValue::min().take(4) {
+            last_value = i;
+            counter += 1;
+        }
+        assert_eq!(4, counter);
+        assert_eq!(PWMValue::new(4), last_value);
+    }
+
+    #[test]
+    fn test_end_of_iteration() {
+        let mut current = PWMValue::new(4094);
+        current = current.next().unwrap_or_default();
+        assert_eq!(PWMValue::new(4095), current);
+
+        current = current.next().unwrap_or_default();
+        assert_eq!(PWMValue::default(), current);
+    }
+
+    #[test]
+    fn test_other_methods() {
+        let current = PWMValue::default();
+        assert_eq!(PWMValue::new(4095), current.last().unwrap_or_default());
+
+        let current = PWMValue::default();
+        let mut stepping_iterator = current.step_by(4);
+        assert_eq!(
+            PWMValue::new(17),
+            stepping_iterator.nth(4).unwrap_or_default()
+        );
+    }
+
+    #[test]
+    fn test_from_u8() {
+        let test_cases = &mut [
+            (0_u8, PWMValue::min()),
+            (1_u8, PWMValue::new(0x11)),
+            (16_u8, PWMValue::new((16 << 4) + 2)),
+            (32_u8, PWMValue::new((32 << 4) + 3)),
+            (48_u8, PWMValue::new((48 << 4) + 4)),
+            (128_u8, PWMValue::new((128 << 4) + 9)),
+            (255_u8, PWMValue::max()),
+        ];
+
+        for case in test_cases {
+            assert_eq!(case.1, PWMValue::from(case.0));
         }
     }
 }
